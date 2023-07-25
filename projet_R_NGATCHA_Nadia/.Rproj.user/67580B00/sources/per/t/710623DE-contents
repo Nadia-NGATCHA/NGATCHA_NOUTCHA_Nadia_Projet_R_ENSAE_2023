@@ -1,0 +1,392 @@
+---
+title: "MY TPPR"
+author: "NNSN"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    toc:yes 
+    toc_depth:10 
+    fig_caption:yes 
+    number_sections:yes
+  word_document: default
+  html_document:
+    df_print: paged
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(gtsummary)
+library(knitr)
+library(tinytex)
+library(readxl)
+library(naniar)
+library(sf)
+library(gt)
+library(leaflet)
+library(raster)
+library(rnaturalearth)
+library(htmlwidgets)
+library(webshot)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+importation de la base de donnée
+
+```{r,echo=TRUE}
+projet<- read_excel("Base_Partie 1.xlsx",
+                    range=NULL,
+                    col_names = TRUE,
+                    col_types = NULL,
+                    )
+
+```
+
+faisons un tableau résumant les valeurs manquantes par valeur
+
+```{r,echo=TRUE}
+data_miss=miss_var_summary(projet)
+print(head(data_miss))
+```
+
+```{r}
+has_missing <- any(is.na(projet$key))
+# Affichage du résultat
+if (has_missing) {
+  print("Il y a des valeurs manquantes pour la variable 'key'.")
+} else {
+  print("Il n'y a pas de valeur manquante pour la variable 'key'.")
+}
+```
+
+# H1 CREATION DE VARIABLES
+
+Renomons les variables q1,q2 et q23 respectivement en région,département
+et sexe
+
+```{r}
+projet<- projet %>% dplyr::rename(region= q1, departement=q2, sexe=q23)
+```
+
+Créons la variable sexe_2 qui vaut 1 si sexe égale à femme et 0 sinon
+
+```{r}
+projet <- projet %>%
+  mutate(sexe_2 = if_else(sexe=="Femme",1,0))
+```
+
+Créer un data frame nommer langue qui prend la variable key et les
+variables concernées
+
+```{r}
+langues<-projet %>% dplyr::select(key,starts_with("q24a_"))
+print(head(langues))
+```
+
+# H1. ANALYSES DESCRIPTIVES
+
+Déterminons la répartion des PME suivant le sexe, le niveau
+d'instrution,le statut juridique, le propriétaire/locataire, le statu
+juridique et le sexe, le niveau d'inscrution et le sexe, propriétaire ou
+locataire et le sexe.
+
+```{r}
+# J'ai renommé les variables filières aux noms des différents filières
+projet2 <- projet %>%
+  rename(arachide = filiere_1, anacarde = filiere_2, mangue = filiere_3, riz =filiere_4)
+
+# J'ai crée la fonction croiser_filiere
+croiser_filiere <- function(projet, filiere) {
+  tbl_summary_result <- projet %>%
+    tbl_summary(
+      include = c("sexe", "q25", "q12", "q81"),
+      by = {{ filiere }},
+      label = list(q25 ~ "niveau d'instruction",
+                   q12 ~ "statut juridique",
+                   q81 ~ "propriétaire ou locataire")
+    ) %>%
+    add_p(pvalue_fun = ~ style_pvalue(.x, digits = 2)) %>%
+    add_overall() %>%
+    add_n() %>%
+    modify_header(label ~ "**Variable**") %>%
+    modify_spanning_header(c("stat_1", "stat_2") ~ paste0("**", filiere, "**")) %>%
+    modify_footnote(all_stat_cols() ~ "Median (IQR) or Frequency (%)") %>%
+    modify_caption(paste0("**Table 1. croisement var et , filiere, **")) %>%
+    bold_labels()
+  
+  return(tbl_summary_result)
+}
+
+tbl_filiere_1 <- croiser_filiere(projet2, filiere = "arachide")
+tbl_filiere_2 <- croiser_filiere(projet2, filiere = "anacarde")
+tbl_filiere_3 <- croiser_filiere(projet2, filiere = "mangue")
+tbl_filiere_4 <- croiser_filiere(projet2, filiere = "riz")
+
+tabl_filiere <- gtsummary::tbl_merge(
+   list(tbl_filiere_1 ,tbl_filiere_2 , tbl_filiere_3, tbl_filiere_4), tab_spanner =  c("Arachide", "Anarcade","Mangue","Riz")) ## intitulé des groupes de tableau associés
+ 
+
+
+# J'ai renommé les variables filières aux noms des différents filières
+projet2 <- projet %>%
+  rename(dir_pal_fr =q24a_1 , dir_pal_wo = q24a_2, dir_pal_dio =q24a_3)
+
+# J'ai crée la fonction croiser_filiere
+croiser_var <- function(projet, action) {
+  tbl_summary_result <- projet %>%
+    tbl_summary(
+      include = c( "q25", "q12", "q81"),
+      by = {{ action }},
+      label = list(q25 ~ "niveau d'instruction",
+                   q12 ~ "statut juridique",
+                   q81 ~ "propriétaire ou locataire")
+    ) %>%
+    add_p(pvalue_fun = ~ style_pvalue(.x, digits = 2)) %>%
+    add_n() %>%
+    modify_header(label ~ "**Variable**") %>%
+    modify_spanning_header(c("stat_1", "stat_2") ~ paste0("**", action, "**")) %>%
+    modify_footnote(all_stat_cols() ~ "Median (IQR) or Frequency (%)") %>%
+    modify_caption(paste0("**Table 1. croisement var et , filiere, **")) %>%
+    bold_labels()
+  
+  return(tbl_summary_result)
+}
+
+tbl1 <- croiser_var(projet2, action="sexe")
+tbl2 <- croiser_var(projet2, action = "dir_pal_fr")
+tbl3 <- croiser_var(projet2, action = "dir_pal_wo")
+tbl4 <- croiser_var(projet2, action = "dir_pal_dio")
+
+tabl_filiere <- gtsummary::tbl_merge(
+   list(tbl1 ,tbl2 , tbl3, tbl4), tab_spanner =  c("sexe", "dir_pal_fr","dir_pal_wo","dir_pal_dio")) ## intitulé des groupes de tableau associés
+tabl_filiere 
+```
+
+3 UN PEU DE CARTOGRAPHIE Transformons le data.frame en données
+géographique dont l'objet sera nommé projet_map
+
+```{r}
+projet_map<- st_as_sf(projet, coords = c("gps_menlongitude", "gps_menlatitude"),crs = 4326)
+class(projet_map)
+
+```
+
+réprésentation spatial des PME suivant le sexe
+
+```{r}
+sen_polyg = getData("GADM", country= "senegal", level = 2)
+
+color_sexe<-colorFactor(c("red","black"),domain=projet_map$sexe)
+
+m<-leaflet(sen_polyg) %>% addPolygons(data = sen_polyg,
+                                     color = "green",weight = 2,
+  opacity = 0.5,
+  fillColor = "white",
+  fillOpacity = 0.1) %>%
+  addCircleMarkers(
+    data=projet_map,
+    radius = 3,
+    color = ifelse(projet_map$sexe == "Homme", "black", "red"), # Utilisation de couleurs différentes selon le sexe
+    fillOpacity = 0.5,
+    popup = ifelse(projet_map$sexe == "Homme", "Homme", "Femme") 
+  ) %>% 
+  addTiles() %>% 
+  addLegend(position="bottomright",
+            pal=color_sexe,
+            title="Sexe",values=projet_map$sexe)
+
+
+# Etant donné que le graphes est interactif il faut faire la capture d'écran
+saveWidget(m,file="Sexe.html")
+webshot("Sexe.html","Sexe.png")
+m
+```
+
+réprésentation spatial des PME suivant le niveau d'instruction
+
+```{r}
+sen_polyg = getData("GADM", country= "senegal", level = 2)
+
+color<-colorFactor(c("red","black","yellow","pink"),domain=projet_map$q25)
+
+m1<-leaflet(sen_polyg) %>% addPolygons(data = sen_polyg,
+                                     color = "black",weight = 2,
+  opacity = 0.5,
+  fillColor = "white",
+  fillOpacity = 0.1) %>%
+  addCircleMarkers(data=projet_map,color=~color(q25),
+    radius = 3,
+     # Utilisation de couleurs différentes selon le sexe
+    fillOpacity = 0.5,
+  ) %>% 
+  addTiles() %>% 
+  addLegend(position="bottomright",
+            pal=color,
+            title="niveau d'instruction",values=projet_map$q25)
+
+
+# Etant donné que le graphes est interactif il faut faire la capture d'écran
+saveWidget(m,file="q25.html")
+webshot("q25.html","q25.png")
+m1
+```
+
+PARTIE 2: NETTOYAGE ET GESTION DES DONNEES importation de la base de
+données Base_Partie 2.
+
+```{r}
+projetN<- read_excel("TP R.S/Base_Partie 2.xlsx",
+                    range=NULL,
+                    col_names = TRUE,
+                    col_types = NULL,
+                    )
+
+```
+
+• Renommons la variable "country_destination" en "destination" et
+définissons les valeurs négatives comme manquantes.
+
+```{r}
+projetN<- projetN %>% dplyr::rename(destination= country_destination)
+projetN[projetN < 0] <- NA
+```
+
+• Créons une nouvelle variable contenant des tranches d'âge de 5 ans en
+utilisant la variable "age". la variriable age possédant des données
+abhérantes, nous allons d'abord chercher à
+
+```{r}
+q1 <- quantile(projetN$age, 0.25)
+q3 <- quantile(projetN$age, 0.75)# calcul du premier et du troisième quartille 
+iqr <- q3 - q1                   #qui serviront à déterminer l'écart interquartile
+min1 <- q1 - 1.5 * iqr
+max1 <- q3 + 1.5 * iqr# calcul des bornes qui nous servirrons à détecter les  valeurs aberrante
+
+#  créons une nouvelle colone val_aber pour stocker les valeurs aberrantes remplacées par la médiane
+projetN$val_aber <- ifelse((projetN$age < min1) | (projetN$age > max1),
+                                    median(projetN$age,na.rm =TRUE ),
+                                    projetN$age)
+#créons les bornes pour les tranches d'age
+bornes<-seq( min(projetN$val_aber),max(projetN$val_aber),by=5)
+# création de la variable "tranche_age" contenant les tranches d'age
+projetN <- within(projetN, tranche_age <- cut(val_aber, breaks = bornes))
+#afficher la table des tranches d'ages
+table(projetN$tranche_age)
+
+```
+
+• Créer une nouvelle variable contenant le nombre d'entretiens réalisés
+par chaque agent recenseur.
+
+```{r}
+nbre_entre_ag <- table(projetN$enumerator)
+projetN$nbre_entretien<-nbre_entre_ag[match(projetN$enumerator,                                               names(nbre_entre_ag))]
+```
+
+• Créer une nouvelle variable qui affecte aléatoirement chaque répondant
+à un groupe de traitement (1) ou de controle (0).
+
+```{r}
+nombre_total_respondants <- nrow(projetN)
+projetN$alea_affect <- sample(c(1, 0), size = nombre_total_respondants, replace = TRUE,prob=NULL)
+```
+
+• Fusionner la taille de la population de chaque district (feuille 2)
+avec l'ensemble de données (feuille 1) afin que toutes les personnes
+interrogées aient une valeur correspondante représentant la taille de la
+population du district dans lequel elles vivent.
+
+```{r}
+projetN2<- read_excel("TP R.S/Base_Partie 2.xlsx",sheet="district")
+fusion <- merge(projetN, projetN2, by = "district", all.x = TRUE)
+         #revoir le nom fusion         
+```
+
+• Calculer la durée de l'entretien et indiquer la durée moyenne de
+l'entretien par enquêteur.
+
+```{r}
+projetN$starttime <- as.POSIXct(projetN$starttime , format = "%Y-%m-%d %H:%M")
+projetN$endtime <- as.POSIXct(projetN$endtime, format = "%Y-%m-%d %H:%M")
+
+# Calculer la durée de l'entretien (en minutes)
+projetN$duree_entretien <- difftime(projetN$endtime, projetN$starttime, units = "mins")
+
+# Calculer la durée moyenne de l'entretien par enquêteur
+dur_moy_enq <- aggregate(projetN$duree_entretien,
+                                         by = list(enqueteur = projetN$enumerator),
+                                         FUN = mean)
+
+# Renommer les colonnes du résultat
+colnames(dur_moy_enq) <- c("enqueteur", "duree_moyenne_entretien")
+
+# Afficher le résultat
+print(dur_moy_enq)
+```
+
+• Renommez toutes les variables de l'ensemble de données en ajoutant le
+préfixe "endline\_"
+
+```{r}
+# Renommer les variables en ajoutant le préfixe "endline_"
+new_names <- paste("endline_", names(projetN), sep = "")
+names(projetN) <- new_names
+```
+
+ANALYSE ET VISUALISATION DES DONNEES
+
+• Créez un tableau récapitulatif contenant l'âge moyen et le nombre
+moyen d'enfants par district.
+
+```{r}
+projetN %>%
+  gtsummary::tbl_summary(
+    include = c(endline_val_aber,endline_children_num ),
+    by =endline_district,
+    statistic = all_continuous() ~ " {mean} "
+  )%>%
+  modify_header(label ~ "**Variables**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**district**") %>%
+  modify_caption("**Tableau recap age et nombre moyen d''enfant par discrit**") %>%
+  bold_labels()
+
+```
+
+• Testons si la différence d'âge entre les sexes est statistiquement
+significative au niveau de 5 %.
+
+```{r}
+projetN %>%
+  gtsummary::tbl_summary(
+    include = endline_val_aber,
+    by = endline_sex
+  ) %>%
+  add_difference()
+```
+
+• Créer un nuage de points de l'âge en fonction du nombre d'enfants
+
+```{r}
+ggplot(projetN) +
+  aes(x = endline_val_aber, y =endline_children_num ) +
+  geom_point(color = "blue", alpha = 0.7) +
+  labs(x = "Âge", y = "Nombre d'enfants", title = "Nuage de points : Âge en fonction du nombre d'enfants")
+```
+
+• La variable "intention" indiquons si les migrants potentiels ont
+l'intention de migrer sur une échelle de 1 à 7. Estimons l'effet de
+l'appartenance au groupe de traitement sur l'intention de migrer.
+
+```{r}
+
+```
+
+• Créez un tableau de régression avec 3 modèles. Les résultats des trois
+modèles doivent être affichés dans un seul tableau.
+
+```{r}
+
+```

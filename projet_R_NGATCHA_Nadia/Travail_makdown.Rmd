@@ -1,0 +1,461 @@
+---
+output:
+  pdf_document:
+    keep_tex: yes
+    fig_caption: yes
+    toc: no
+  word_document: default
+  html_document:
+    df_print: paged
+outp ut:
+  pdf_document:
+    toc: yes
+    fig_caption: yes
+    toc_depth: 4
+header-includes: 
+  - \usepackage{pdfpages}
+  - \usepackage{graphicx}
+---
+\includepdf{page_de_garde.pdf}
+
+```{=tex}
+\thispagestyle{empty}
+\newpage
+```
+```{=tex}
+\setcounter{tocdepth}{4}                
+\renewcommand{\contentsname}{\textcolor{blue}{Sommaire}}
+```
+\textcolor{blue}{\tableofcontents} \newpage
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(gtsummary)
+library(knitr)
+library(tinytex)
+library(readxl)
+library(naniar)
+library(sf)
+library(gt)
+library(leaflet)
+library(raster)
+library(rnaturalearth)
+library(htmlwidgets)
+library(webshot)
+library(parameters)
+library(broom)
+library(spdep)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# PARTIE I
+
+## 1.Préparation des données
+### 1.1 Description
+  Dans cette sous partie aucune n'instruction n'a été demandée.Elle a été faite afin de permettre à l'élève de mieux se familiariser avec la base Base_Partie 1 qui: regroupe les variables relatives à certains caractéristiques socio-professionnels des dirigeants des différents PME, les coordonnées géographique des PME et la date de soumission des informations de la PME à l'enqueteur. La résolution des questions suivantes se fera essentiellement à l'aide de ces données.
+
+### 1.2 importation et mise en forme
+dans section il s'agira de faire quelques opérations sur la base de donnée Base_partie 1 à savoir l'importation des données et la détection des valeurs manquantes par variable.
+
+#### 1.2.1 importation de la base de donné
+```{r,echo=TRUE}
+projet<- read_excel("Base_Partie 1.xlsx",
+                    range=NULL,
+                    col_names = TRUE,
+                    col_types = NULL,
+                    ) #la base de donnée étant sous l'extension xlsx,
+#la fonction read_excel du package readxl est la mieux adapter pour son importation.
+
+```
+
+#### 1.2.2 faisons un tableau résumant les valeurs manquantes par valeur
+  pour le faire nous ferons usage de la fonction miss_var_summary du package naniar qui à pour role principal de ressortir un résumé des valeurs manquantes pour chaque variables de la base de donnée. En effet, elle permet de calculer pour chaque variable le nombre total des valeurs manquantes ainsi que la proportion de valeur manquante pour chaque variable.
+
+```{r,echo=TRUE}
+data_miss=miss_var_summary(projet)
+kable(head(data_miss))
+```
+
+#### 1.2.3 	Vérifions s’il y a des valeurs manquantes pour la variable key dans la base projet. Si oui, identifier la (ou les) PME concernée(s).
+pour la résolution de cette question nous avons fait usage à une structure conditionnelle qui retournera si la variable key contient ou non des valeurs manquantes et comme après éxécution du code key n'a pas de valeur manquantes, aucune PME ne sera identifiée.
+```{r}
+has_missing <- any(is.na(projet$key))# vérifie si la variable key contient des valeurs NA
+# Affichage du résultat
+if (has_missing) {
+  print("Il y a des valeurs manquantes pour la variable 'key'.")
+} else {
+  print("Il n'y a pas de valeur manquante pour la variable 'key'.")
+}
+```
+
+### 1.3 Création de variables
+
+#### 1.3.1 Renomons les variables q1,q2 et q23 respectivement en région,département et sexe
+pour cela nous ferons juste usage de la fonction renames de **dplyr**
+
+```{r}
+projet<- projet %>% dplyr::rename(region= q1, departement=q2, sexe=q23) #"%>%" permet de chaîner des opérations de transformation de données en passant le résultat d'une étape à la suivante.
+```
+
+#### 1.3.2 Créons la variable sexe_2 qui vaut 1 si sexe égale à femme et 0 sinon
+Pour ceci nous ferrons juste usage des fonctions mutate et if_else du package dplyr.
+
+```{r}
+projet <- projet %>%
+  # Mutate permet l'ajout de la colonne sexe_2 au data frame projet
+  mutate(sexe_2 = if_else(sexe=="Femme",1,0))
+```
+
+#### 1.3.3 Créons un data frame nommer langue qui prend la variable key et les variables correspondantes aux langues parlées.
+  pour le faire nous ferons usage de la fonction select de dplyr. Comme les variables correspondantes aux langues parlées commence tous par **q24a_** , l'usage de **starts_with** sera très bénéfique car il permettra de selectionner aisement toutes les variables de la base qui commencent par **q25a_** dont toutes les langues parlées présentes dans la base.
+
+```{r}
+langues<-projet %>% dplyr::select(key,starts_with("q24a_"))
+```
+
+##  ANALYSES DESCRIPTIVES
+
+Déterminons la répartion des PME suivant le sexe, le niveau d'instrution,le statut juridique,le propriétaire/locataire, le statut juridique et le sexe, le niveau d'inscrution et le sexe, propriétaire ou locataire et le sexe.
+
+pour cela nous créerons deux tableaux distinct que nous rélierons par la suite avec la fonction **  ** nous allons reliés les deux tableaux. 
+```{r}
+projet%>% 
+  dplyr::select(sexe,q25,q12,q81)%>%
+  gtsummary::tbl_summary(
+    by=sexe,
+    label=list(q25~"Niveau d'instruction", 
+               q12~"statut Juridique",
+               q81~"propriétaire/locataire"
+    ),
+   statistic = list(all_categorical()~ "{n}%"),
+   missing="always",
+   missing_text="Missing",
+   percent="column"
+   
+  )%>%
+add_overall()%>%
+bold_labels()
+```
+
+
+### 1.3 UN PEU DE CARTOGRAPHIE 
+  Dans cette section nous serons appelés à représenter les données sur les cartes plus principalement sur la carte du Sénégal. Notons que nous avons choisi de faire des cartes dynamiques parceque nous vivons dans un monde en parfait évolution de ce fait les données peuvent changer à tous moment raison pour laquelle il est nécessaire de travailler avec les objet dynamic pour facilement les adapter aux différents changements.
+
+####  1.3.1 Transformons le data.frame en données géographique dont l'objet sera nommé projet_map
+Pour la transformation d'un data frame en des données géographiques nous aurons besoin de la library **sf**
+```{r}
+projet_map<- st_as_sf(projet, coords = c("gps_menlongitude", "gps_menlatitude"),crs = 4326)
+class(projet_map)# projet_map n'est rien d'autre que le data frame projet au quel on a ajouter les coordonnées géographique des PME.
+
+```
+
+#### 1.3.2 réprésentation spatial des PME suivant le sexe
+
+Pour se faire, nous ferons usage de GADM qui est une base de donnée mondiale qui fournie les informations géospaciales sur les subdivisions des différents pays par régions,départements, communes etc...
+
+
+```{r}
+sen_polyg = getData("GADM", country= "senegal", level = 1)
+# couleur réprésentative du genre de chaque chef des PME sur la carte
+color_sexe<-colorFactor(c("red","black"),domain=projet_map$sexe)
+#création d'une carte interactive
+m<-leaflet(sen_polyg) %>% addPolygons(data = sen_polyg,
+                                     color = "black",weight = 2, #ajouter un polygone sur la carte
+  opacity = 0.5,
+  fillColor = "white",
+  fillOpacity = 0.1) %>%
+  addCircleMarkers(
+    data=projet_map,
+    radius = 3,
+    color = ifelse(projet_map$sexe == "Homme", "black", "red"), # Utilisation de couleurs différentes selon le sexe
+    fillOpacity = 0.5,
+    popup = ifelse(projet_map$sexe == "Homme", "Homme", "Femme") 
+  ) %>% 
+  addTiles() %>% 
+  addLegend(position="bottomright",
+            pal=color_sexe,
+            title="Sexe",values=projet_map$sexe) # ajouter une légende sur la carte
+
+
+# Etant donné que le graphes est interactif il faut faire la capture d'écran
+saveWidget(m,file="Sexe.html")
+webshot("Sexe.html","Sexe.png")
+
+```
+
+#### 1.3.3 réprésentation spatial des PME suivant le niveau d'instruction
+
+Ici, nous procédons de la meme façon qu'a la question 1.3.2
+
+```{r}
+sen_polyg = getData("GADM", country= "senegal", level = 1)
+#Definition d'un jeu de 4 couleurs qui représentera chaque niveau scolaire.
+color<-colorFactor(c("red","black","yellow","green"),domain=projet_map$q25) 
+#Création d'une carte interactive
+m1<-leaflet(sen_polyg) %>% addPolygons(data = sen_polyg,
+                                     color = "black",weight = 4,
+  opacity = 0.5,
+  fillColor = "white",
+  fillOpacity = 0.1) %>%
+  addCircleMarkers(data=projet_map,color=~color(q25),
+    radius = 3,
+     # Utilisation de couleurs différentes selon le sexe
+    fillOpacity = 0.5,
+  ) %>% 
+  addTiles() %>% 
+  addLegend(position="bottomright",
+            pal=color,
+            title="niveau d'instruction",values=projet_map$q25)# positionnement de la légende à droite
+
+
+# Etant donné que le graphes est interactif il faut faire la capture d'écran
+saveWidget(m1,file="q25.html")
+webshot("q25.html","q25.png")
+```
+
+
+
+#### 1.3.4 faisons une analyse spatiale de notre choix 
+
+repartition des PME suivant qu'ils soient propriétaires ou localtaires
+```{r}
+sen_polyg = getData("GADM", country= "senegal", level = 1)
+# couleur réprésentative du genre de chaque chef des PME sur la carte
+color_Pro<-colorFactor(c("green","red"),domain=projet_map$q81)
+#création d'une carte interactive
+m2<-leaflet(sen_polyg) %>% addPolygons(data = sen_polyg,
+                                     color = "black",weight = 2, #ajouter un polygone sur la carte
+  opacity = 0.5,
+  fillColor = "white",
+  fillOpacity = 0.1) %>%
+  addCircleMarkers(
+    data=projet_map,
+    radius = 3,
+    color = ifelse(projet_map$q81 == "Propriétaire", "green", "red"), # Utilisation de couleurs différentes selon le sexe
+    fillOpacity = 0.5,
+    popup = ifelse(projet_map$q81 == "Propriétaire", "Propriétaire", "Locataire") 
+  ) %>% 
+  addTiles() %>% 
+  addLegend(position="bottomright",
+            pal=color_Pro,
+            title="propriétaire",values=projet_map$q81) # ajouter une légende sur la carte
+
+
+# Etant donné que le graphes est interactif il faut faire la capture d'écran
+saveWidget(m2,file="q81.html")
+webshot("q81.html","q81.png")
+
+```
+
+
+
+# PARTIE 2: NETTOYAGE ET GESTION DES DONNEES importation de la base de
+Ici nous ferons usage de la Base_Partie 2 sur laquelle nous renommerons ou créerons des variables, créerons un nuage de points et éffectuerons un ensemble de testes.
+
+## Importation de Base_partie 2
+pour effectuer n'importe quelle opération sur la base il est nécéssaire de l'importée.
+```{r}
+projetN<- read_excel("Base_Partie 2.xlsx",
+                    range=NULL,
+                    col_names = TRUE,
+                    col_types = NULL,
+                    )
+
+```
+
+
+
+### 2.1 Nettoyage et gestion des données
+Ici, nous effectuerons certaines tache sur les variables et manipulerons les données manquantes
+
+#### 2.1.1 Renommons la variable "country_destination" en "destination" et définissons les valeurs négatives comme manquantes.
+Pour éxécuter cette tache, nous fairerons usage de la fonction **rename** de **dplyr**.
+
+```{r}
+projetN<- projetN %>% dplyr::rename(destination= country_destination)
+#filtrage de toutes les valeurs négatives du data frame projet et leur remplacement par les NA supprimant ainsi les valeurs négatives de la base.
+projetN[projetN < 0] <- NA 
+```
+
+#### 2.1.2 Créons une nouvelle variable contenant des tranches d'âge de 5 ans en utilisant la variable "age". 
+la variriable age possédant des données abhérantes, nous allons d'abord chercher à éliminer l'effet de ces valeurs. pour cela, nous procéderons à une imputation par la médiane. Le choix de cette méthode se justifie par le faite que la médiane est moins sensible au valeurs abhérantes.
+
+```{r}
+# calcul du premier et du troisième quartille qui serviront à déterminer l'écart interquartile
+q1 <- quantile(projetN$age, 0.25)
+q3 <- quantile(projetN$age, 0.75)
+#calcul de l'écart interquartile iqr.
+iqr <- q3 - q1      
+# calcul des bornes inférieurs et supérieurs qui nous servirrons à détecter les  valeurs aberrante
+min1 <- q1 - 1.5 * iqr
+max1 <- q3 + 1.5 * iqr
+
+#  créons une nouvelle colone val_aber pour stocker les valeurs aberrantes remplacées par la médiane
+projetN$val_aber <- ifelse((projetN$age < min1) | (projetN$age > max1),
+                                    median(projetN$age,na.rm =TRUE ),
+                                    projetN$age)
+#créons les bornes pour les tranches d'age
+bornes<-seq( min(projetN$val_aber),max(projetN$val_aber),by=5)
+# création de la variable "tranche_age" contenant les tranches d'age
+projetN <- within(projetN, tranche_age <- cut(val_aber, breaks = bornes))
+#afficher la table des tranches d'ages
+table(projetN$tranche_age)
+
+```
+
+#### 2.1.3 Créer une nouvelle variable contenant le nombre d'entretiens réalisés par chaque agent recenseur.
+Pour cela, nous créerons la table nbre_entre_ag contiendra le nombre d'occurrences de chaque valeur unique dans la colonne enumerator.la fonction match ici, recherche les positions des valeurs de projetN$enumerator dans names(nbre_entre_ag) (les noms des valeurs uniques dans la table nbre_entre_ag). Elle retourne un vecteur avec les positions correspondantes. pour chaque valeur de enuméretor,nbre_entre_ag[match(...)] renvoie le nombre d'entretients correspondant à cette valeur.
+
+```{r}
+nbre_entre_ag <- table(projetN$enumerator)
+#création d'une nouvelle colone dans le projetN.
+projetN$nbre_entretien<-nbre_entre_ag[match(projetN$enumerator,                                               names(nbre_entre_ag))]
+```
+
+#### 2.1.4 Créer une nouvelle variable qui affecte aléatoirement chaque répondant à un groupe de traitement (1) ou de controle (0).
+Pour cela nous allons d'abord déterminer le nombre de ligne de projetN avec la fonction **nrow**. ensuite, nous ferons usage de la fonction sample qui génèrera aléatoirement soit 0, soit 1 à chaque différentes ligne.
+
+```{r}
+#Détermination du nombre de ligne du data frame projetN
+nombre_total_respondants <- nrow(projetN)
+#Génèration aléatoire des valeur 0 et 1 aux différentes lignes.
+projetN$alea_affect <- sample(c(1, 0), size = nombre_total_respondants, replace = TRUE,prob=NULL)
+```
+
+#### 2.1.5 Fusionner la taille de la population de chaque district (feuille 2) avec l'ensemble de données (feuille 1) afin que toutes les personnes interrogées aient une valeur correspondante représentant la taille de la population du district dans lequel elles vivent.
+La feuille une de Base_partie 2 étant déja importée, nous importerons maintenant uniquement la feuille deux de ce fichier.Puis à l'aide de la fonction merge nous aurons le résultat souhaiter.
+
+```{r}
+#importation de la feuille 2 de Base_partie 2
+projetN2<- read_excel("Base_Partie 2.xlsx",sheet="district")
+#Création du data frame fusion qui contient la fusion des deux feuilles.
+fusion <- merge(projetN, projetN2, by = "district", all.x = TRUE)
+                  
+```
+
+
+#### 2.1.6 Calculer la durée de l'entretien et indiquer la durée moyenne de l'entretien par enquêteur.
+Pour cela nous créerons d'abord une varible qui contient la durée de chaque entretient.Ensuite à l'aide ces durées, nous déterminerons la durée moyenne par enqueteur.
+
+```{r}
+projetN$starttime <- as.POSIXct(projetN$starttime , format = "%Y-%m-%d %H:%M")
+projetN$endtime <- as.POSIXct(projetN$endtime, format = "%Y-%m-%d %H:%M")
+
+# Calculer la durée de l'entretien (en minutes)
+projetN$duree_entretien <- difftime(projetN$endtime, projetN$starttime, units = "mins")
+
+# Calculer la durée moyenne de l'entretien par enquêteur
+dur_moy_enq <- aggregate(projetN$duree_entretien,
+                                         by = list(enqueteur = projetN$enumerator),
+                                         FUN = mean)
+
+# Renommer les colonnes du résultat
+colnames(dur_moy_enq) <- c("enqueteur", "duree_moyenne_entretien")
+
+# Afficher le résultat
+print(dur_moy_enq)
+```
+
+#### 2.1.7 Renommez toutes les variables de l'ensemble de données en ajoutant le préfixe "endline\_"
+Ici, nous ferons usage de la fonction  paste() qui est utilisée pour créer un nouveau vecteur de noms de colonnes en ajoutant le préfixe "endline_" à chaque nom de colonne existant. Le paramètre sep = "" spécifie que les éléments sont concaténés sans espace entre le préfixe et les noms de colonnes existants.
+
+```{r}
+# Renommer les variables en ajoutant le préfixe "endline_"
+new_names <- paste("endline_", names(projetN), sep = "")
+#attribution au nouvel objet de noms de colonnes, new_names, à l'objet de données projetN.
+names(projetN) <- new_names
+
+```
+
+
+### 2.2 ANALYSE ET VISUALISATION DES DONNEES
+
+Dans cette section nous ferons ressortir quelques tableaux,et nous éffectuerons également quelques tests.
+
+#### 2.2.1 Créez un tableau récapitulatif contenant l'âge moyen et le nombre moyen d'enfants par district.
+Comme resultat nous un tableau ayant en colonne les différents discrits et en ligne les variables endline_val_aber, endline_children_num . les valeurs du tableau contiendrons donc l'age moyen et le nombre moyen d'enfants par discrit. NB: Nous avons travailler avec la variable endline_val_aber au lieu de endline_age parceque sur endline_val_aber nous avons déjà gérer le problème des valeurs abérantes.
+
+```{r}
+projetN %>%
+  #création du tableau à l'aide de la fonction tbl_summary de gtsummary
+  gtsummary::tbl_summary(
+    include = c(endline_val_aber,endline_children_num ),
+    by =endline_district,
+    statistic = all_continuous() ~ " {mean} "
+  )%>%
+  modify_header(label ~ "**Variables**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**district**") %>%
+  #afficher le titre du tableau
+  modify_caption("**Tableau recap age et nombre moyen d''enfant par discrit**") %>%
+  # Mettre les variables en gras
+  bold_labels()
+
+```
+
+####  2.2.2 Testons si la différence d'âge entre les sexes est statistiquement significative au niveau de 5 %.
+D'après le test, on obtient une pie-value de **0.061** qui est supérieur à 5% donc la différence d'age entre les sexes n'est pas statistiquement significatif.
+
+```{r}
+projetN %>%
+  gtsummary::tbl_summary(
+    include = endline_val_aber,
+    by = endline_sex
+  ) %>%
+  #idiquons la différence entre les différentes catégories à l'aide de la fonction add_difference()
+  add_difference()
+```
+
+
+#### 2.2.3 Créer un nuage de points de l'âge en fonction du nombre d'enfants
+Pour cette question nous ferrons usage de ggplot pour avoir un nuage de point un peu jolie.
+```{r}
+ggplot(projetN) +
+  aes(x = endline_val_aber, y =endline_children_num ) +
+  geom_point(color = "blue", alpha = 0.7) +
+  labs(x = "Âge", y = "Nombre d'enfants", title = "Nuage de points : Âge en fonction du nombre d'enfants")# Donne l'institulé des différents axes ainsi que le titre du graphique.
+```
+
+
+#### 2.2.4 La variable "intention" indiquons si les migrants potentiels ont l'intention de migrer sur une échelle de 1 à 7. Estimons l'effet de l'appartenance au groupe de traitement sur l'intention de migrer.
+
+Pour l'estimation, nous allons effectuer un test à l'aide d'un model de regression linéaire simple.
+
+**Interprétation du résultat**: le coefficient beta étant positif, une augmentation de l'appartenance au groupe de traitement entraine une augmentation de l'intention de migrer. La pie-Value étant supérieur à **0.9**, elle est élevée ce qui fait comprendre que  l'effet de l'appartenance au groupe de migrants potentiel sur l'intension de migrer n'est pas statistiquement significatif et que les différences entre les groupes pourraient être attribuées au hasard.
+L'interval de confiance étant de **0.7** nous indique que l'estimation est moins précise.
+```{r}
+#lm nécessaire pour éffectuer de la regression
+model <- lm(endline_intention ~endline_alea_affect , data = projetN)
+tbl_regression(model) #permet d'afficher le tableaude regression
+```
+
+#### 2.2.5 Créez un tableau de régression avec 3 modèles. Les résultats des trois modèles doivent être affichés dans un seul tableau.
+Etant donné que nous n'avons pas encore les baggages nécessaires pour les interprétations des modéles, dans cette partie nous nous limiterrons à la présentation du resultat demandé.
+
+```{r}
+#MODEL A:Modèle vide - Effet du traitement sur les intentions
+modele_A<-lm(endline_intention ~endline_alea_affect , data = projetN)
+mod1<-tbl_regression(modele_A)
+
+#Model B: Effet du traitement sur les intentions en tenant compte de l’âge et du sexe
+modele_B<-lm(endline_intention ~endline_alea_affect+endline_val_aber+endline_sex , data = projetN)
+mod2<-tbl_regression(modele_B)
+
+#Model C: Identique au modèle B mais en contrôlant le district. 
+modele_C<-lm(endline_intention ~endline_alea_affect+endline_val_aber+endline_sex+endline_district , data = projetN)
+mod3<-tbl_regression(modele_C)
+
+#combinaison des modèles dans un seul tableau
+tbl_merge(list(mod1, mod2, mod3))%>% modify_caption("**Tableau de regression final**")
+```
+
+#                                     FIN PARTIE I et II
+
+# PARTIE III
+Pour cette partie voici le lien de l'application
+
+https://ngatchanadia.shinyapps.io/Documents/
+
+NB: nous tenons à noter que l'application fonctionne toutefois des soucis de réseau peuvent etre un frein à son exécution. 
